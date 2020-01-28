@@ -1,0 +1,13 @@
+[package]
+name = "orange-zester"
+version = "0.1.0"
+authors = ["Cldfire"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+orange-zest = { git = "https://github.com/Cldfire/orange-zest.git" }
+structopt = "0.3"
+rpassword = "4.0"
+serde_json = "1.0"

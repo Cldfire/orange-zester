@@ -2,6 +2,7 @@ use structopt::StructOpt;
 use structopt::clap::arg_enum;
 use rpassword::read_password_from_tty;
 use enum_iterator::IntoEnumIterator;
+use indicatif::{ProgressBar, ProgressStyle};
 use orange_zest::Zester;
 use std::path::PathBuf;
 use std::fs::File;
@@ -63,15 +64,36 @@ fn main() {
                 json_types = JsonType::into_enum_iter().collect();
             }
 
+            let pb = ProgressBar::new_spinner();
+            pb.enable_steady_tick(120);
+            pb.set_style(
+                ProgressStyle::default_spinner()
+                    .tick_strings(&[
+                        "▹▹▹▹▹",
+                        "▸▹▹▹▹",
+                        "▹▸▹▹▹",
+                        "▹▹▸▹▹",
+                        "▹▹▹▸▹",
+                        "▹▹▹▹▸",
+                        "▪▪▪▪▪",
+                    ])
+                    .template("{spinner:.blue} {msg}"),
+            );
+
+            pb.set_message("Creating zester");
             let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap()).unwrap();
+            pb.println("Zester created");
 
             // Grab all the data we were asked to
             for json_type in json_types {
                 let json;
+                let finish_msg;
                 let file_name;
 
                 match json_type {
                     JsonType::Likes => {
+                        pb.set_message("Zesting likes");
+
                         json = if pretty_print {
                             serde_json::to_string_pretty(&zester.likes().unwrap()).unwrap()
                         } else {
@@ -79,8 +101,11 @@ fn main() {
                         };
 
                         file_name = "likes";
+                        finish_msg = "Zested likes";
                     },
                     JsonType::Me => {
+                        pb.set_message("Zesting profile information");
+
                         json = if pretty_print {
                             serde_json::to_string_pretty(&zester.me().unwrap()).unwrap()
                         } else {
@@ -88,6 +113,7 @@ fn main() {
                         };
 
                         file_name = "me";
+                        finish_msg = "Zested profile information";
                     }
                 }
 
@@ -98,9 +124,10 @@ fn main() {
 
                 let mut file = File::create(path).unwrap();
                 file.write_all(json.as_bytes()).unwrap();
+                pb.println(finish_msg);
             }
+
+            pb.finish_with_message("Zesting complete");
         }
     }
-
-
 }

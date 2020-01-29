@@ -8,11 +8,13 @@ use orange_zest::api::Likes;
 use dotenv::dotenv;
 use std::env;
 use std::path::PathBuf;
+use std::fs;
 use std::fs::File;
 use std::io;
 
 #[derive(StructOpt, Debug)]
 enum Opts {
+    /// Obtain JSON archives of meaningful data
     Json {
         /// OAuth token
         #[structopt(long)]
@@ -27,17 +29,18 @@ enum Opts {
         #[structopt(short, long)]
         pretty_print: bool,
         /// Output folder
-        #[structopt(short, long, parse(from_os_str), required = true)]
+        #[structopt(short, long, parse(from_os_str), required = true, value_name = "path")]
         output_folder: PathBuf,
-        /// The kind(s) of data to get
+        /// Data kinds to get
         #[structopt(
             possible_values = &JsonType::variants(),
             case_insensitive = true,
             required_unless("all"),
-            min_values = 1)
-        ]
+            min_values = 1
+        )]
         json_types: Vec<JsonType>
     },
+    /// Obtain audio specified by pre-obtained JSON archives
     Audio {
         /// OAuth token
         #[structopt(long)]
@@ -45,22 +48,25 @@ enum Opts {
         /// Client ID
         #[structopt(long)]
         client_id: Option<String>,
+        /// Only get n most recent items
+        #[structopt(short, long, value_name = "n")]
+        recent: Option<u32>,
         /// Download all available audio (playlists, likes, etc.)
         #[structopt(short, long)]
         all: bool,
         /// Output folder
-        #[structopt(short, long, parse(from_os_str), required = true)]
+        #[structopt(short, long, parse(from_os_str), required = true, value_name = "path")]
         output_folder: PathBuf,
         /// Input folder from which to obtain JSON
-        #[structopt(short, long, parse(from_os_str), required = true)]
+        #[structopt(short, long, parse(from_os_str), required = true, value_name = "path")]
         input_folder: PathBuf,
-        /// The kind(s) of audio to get
+        /// Audio kinds to get
         #[structopt(
             possible_values = &AudioType::variants(),
             case_insensitive = true,
             required_unless("all"),
-            min_values = 1)
-        ]
+            min_values = 1
+        )]
         audio_types: Vec<AudioType>
     }
 }
@@ -84,7 +90,9 @@ arg_enum! {
 enum Error {
     OrangeZestError(orange_zest::Error),
     VarError(std::env::VarError),
-    IoError(std::io::Error)
+    IoError(std::io::Error),
+    /// No JSON file present at path
+    JsonFileNotFound(String)
 }
 
 impl From<orange_zest::Error> for Error {
@@ -190,7 +198,7 @@ fn main() -> Result<(), Error> {
             pb.finish_with_message("Zesting complete");
         },
 
-        Opts::Audio { mut oauth_token, mut client_id, all, output_folder, input_folder, mut audio_types } => {
+        Opts::Audio { mut oauth_token, mut client_id, recent, all, output_folder, input_folder, mut audio_types } => {
             ensure_secrets_present(&mut oauth_token, &mut client_id)?;
 
             // Manually stick all the possible types in the vector if the all flag
@@ -207,13 +215,32 @@ fn main() -> Result<(), Error> {
                     AudioType::Likes => {
                         let mut input_file = input_folder.clone();
                         input_file.push("likes.json");
-                        let likes: Likes = load_json(&input_file)?;
 
-                        // TODO: take(5) is for testing
-                        for track in likes.collections.iter().map(|c| &c.track).take(5) {
-                            let mut output_file = output_folder.clone();
-                            // TODO: this could cause conflicts
-                            output_file.push(track.title.as_ref().unwrap().clone() + ".m4a");
+                        // Complicated-looking error handling to display a nice message to
+                        // the user if there's no JSON data for likes in the expected
+                        // location
+                        let likes: Likes = match load_json(&input_file) {
+                            Ok(likes) => likes,
+                            Err(orange_zest::Error::IoError(e)) => match e.kind() {
+                                io::ErrorKind::NotFound => return Err(Error::JsonFileNotFound(input_file.to_str().unwrap().into())),
+                                _ => return Err(e.into())
+                            },
+                            Err(e) => return Err(e.into())
+                        };
+                        
+                        let mut likes_folder = output_folder.clone();
+                        likes_folder.push("likes/");
+                        if !likes_folder.exists() {
+                            fs::create_dir(&likes_folder)?;
+                        }
+
+                        for track in likes.collections
+                            .iter()
+                            .map(|c| &c.track)
+                            .take(recent.unwrap_or(std::u32::MAX) as usize)
+                        {
+                            let mut output_file = likes_folder.clone();
+                            output_file.push(format!("{} (id={}).m4a", track.title.as_ref().unwrap(), track.id.unwrap()));
 
                             let mut file = File::create(&output_file)?;
                             io::copy(&mut track.download(&zester)?, &mut file)?;

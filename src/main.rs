@@ -127,14 +127,13 @@ fn ensure_secrets_present(oauth_token: &mut Option<String>, client_id: &mut Opti
     Ok(())
 }
 
-// TODO: get rid of unwraps
-fn main() {
+fn main() -> Result<(), Error> {
     let opt = Opts::from_args();
     dotenv().ok();
 
     match opt {
         Opts::Json { mut oauth_token, mut client_id, all, pretty_print, output_folder, mut json_types } => {
-            ensure_secrets_present(&mut oauth_token, &mut client_id).unwrap();
+            ensure_secrets_present(&mut oauth_token, &mut client_id)?;
 
             // Manually stick all the possible types in the vector if the all flag
             // was set
@@ -159,7 +158,7 @@ fn main() {
             );
 
             pb.set_message("Creating zester");
-            let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap()).unwrap();
+            let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap())?;
             pb.println("Zester created");
 
             // Grab all the data we were asked to
@@ -170,8 +169,8 @@ fn main() {
 
                         let mut path = output_folder.clone();
                         path.push("likes.json");
-                        let likes = zester.likes().unwrap();
-                        write_json(&likes, &path, pretty_print).unwrap();
+                        let likes = zester.likes()?;
+                        write_json(&likes, &path, pretty_print)?;
 
                         pb.println("Zested likes");
                     },
@@ -180,8 +179,8 @@ fn main() {
 
                         let mut path = output_folder.clone();
                         path.push("me.json");
-                        let me = zester.me().unwrap();
-                        write_json(&me, &path, pretty_print).unwrap();
+                        let me = zester.me()?;
+                        write_json(&me, &path, pretty_print)?;
 
                         pb.println("Zested profile information");
                     }
@@ -192,7 +191,7 @@ fn main() {
         },
 
         Opts::Audio { mut oauth_token, mut client_id, all, output_folder, input_folder, mut audio_types } => {
-            ensure_secrets_present(&mut oauth_token, &mut client_id).unwrap();
+            ensure_secrets_present(&mut oauth_token, &mut client_id)?;
 
             // Manually stick all the possible types in the vector if the all flag
             // was set
@@ -200,7 +199,7 @@ fn main() {
                 audio_types = AudioType::into_enum_iter().collect();
             }
 
-            let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap()).unwrap();
+            let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap())?;
 
             // Grab all the data we were asked to
             for audio_type in audio_types {
@@ -208,7 +207,7 @@ fn main() {
                     AudioType::Likes => {
                         let mut input_file = input_folder.clone();
                         input_file.push("likes.json");
-                        let likes: Likes = load_json(&input_file).unwrap();
+                        let likes: Likes = load_json(&input_file)?;
 
                         // TODO: take(5) is for testing
                         for track in likes.collections.iter().map(|c| &c.track).take(5) {
@@ -216,12 +215,14 @@ fn main() {
                             // TODO: this could cause conflicts
                             output_file.push(track.title.as_ref().unwrap().clone() + ".m4a");
 
-                            let mut file = File::create(&output_file).unwrap();
-                            io::copy(&mut track.download(&zester).unwrap(), &mut file).unwrap();
+                            let mut file = File::create(&output_file)?;
+                            io::copy(&mut track.download(&zester)?, &mut file)?;
                         }
                     }
                 }
             }
         }
     }
+
+    Ok(())
 }

@@ -1,3 +1,5 @@
 /target
 **/*.rs.bk
 test.json
+/test-json
+.DS_store

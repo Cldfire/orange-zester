@@ -243,7 +243,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "orange-zest"
 version = "0.1.0"
-source = "git+https://github.com/Cldfire/orange-zest.git#838caf4e25aa692cd4b558ea725929aac83e5b79"
 dependencies = [
  "serde 1.0.104 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.104 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -257,7 +256,7 @@ version = "0.1.0"
 dependencies = [
  "enum-iterator 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "indicatif 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "orange-zest 0.1.0 (git+https://github.com/Cldfire/orange-zest.git)",
+ "orange-zest 0.1.0",
  "rpassword 4.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.45 (registry+https://github.com/rust-lang/crates.io-index)",
  "structopt 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -746,7 +745,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum memchr 2.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3197e20c7edb283f87c071ddfc7a2cca8f8e0b888c242959846a6fce03c72223"
 "checksum nom 4.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "2ad2a91a8e869eeb30b9cb3119ae87773a8f4ae617f41b1eb9c154b2905f7bd6"
 "checksum number_prefix 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "17b02fc0ff9a9e4b35b3342880f48e896ebf69f2967921fe8646bf5b7125956a"
-"checksum orange-zest 0.1.0 (git+https://github.com/Cldfire/orange-zest.git)" = "<none>"
 "checksum percent-encoding 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "31010dd2e1ac33d5b46a5b413495239882813e0369f8ed8a5e266f173602f831"
 "checksum percent-encoding 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "d4fd5641d01c8f18a23da7b6fe29298ff4b55afcccdf78973b24cf3175fee32e"
 "checksum proc-macro-error 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)" = "1b79a464461615532fcc8a6ed8296fa66cc12350c18460ab3f4594a6cee0fcb6"

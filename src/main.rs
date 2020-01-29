@@ -6,6 +6,9 @@ use indicatif::{ProgressBar, ProgressStyle};
 use orange_zest::{load_json, write_json, Zester};
 use orange_zest::api::Likes;
 use dotenv::dotenv;
+use std::thread;
+use std::time::Duration;
+use std::cmp::min;
 use std::env;
 use std::path::PathBuf;
 use std::fs;
@@ -234,17 +237,38 @@ fn main() -> Result<(), Error> {
                             fs::create_dir(&likes_folder)?;
                         }
 
+                        let download_num = min(recent.unwrap_or(std::u32::MAX) as usize, likes.collections.len());
+
+                        let pb = ProgressBar::new(download_num as u64);
+                        pb.enable_steady_tick(120);
+                        pb.set_style(ProgressStyle::default_bar()
+                            .template("{spinner:.blue} {msg} [{bar:40.cyan/blue}] ({pos}/{len}) ({eta})")
+                            .progress_chars("#>-"));
+
                         for track in likes.collections
                             .iter()
                             .map(|c| &c.track)
-                            .take(recent.unwrap_or(std::u32::MAX) as usize)
+                            .take(download_num)
                         {
                             let mut output_file = likes_folder.clone();
-                            output_file.push(format!("{} (id={}).m4a", track.title.as_ref().unwrap(), track.id.unwrap()));
+                            let title = track.title.as_ref().unwrap();
+                            output_file.push(format!("{} (id={}).m4a", title, track.id.unwrap()));
+                            pb.set_message(&format!("{:<40}", if title.len() < 38 {
+                                title.into()
+                            } else {
+                                format!("{}...", &title[0..37])
+                            }));
 
                             let mut file = File::create(&output_file)?;
+                            // TODO: gonna need to watch for 500s, pause, and then start downloading again
                             io::copy(&mut track.download(&zester)?, &mut file)?;
+                            pb.inc(1);
+
+                            // sleep to attempt to avoid 500s
+                            thread::sleep(Duration::from_secs(2));
                         }
+
+                        pb.finish_with_message(&format!("{:<40}", "Zested audio tracks from likes"));
                     }
                 }
             }

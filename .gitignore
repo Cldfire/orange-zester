@@ -3,3 +3,4 @@
 test.json
 /test-json
 .DS_store
+.env

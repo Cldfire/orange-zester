@@ -5,6 +5,8 @@ use enum_iterator::IntoEnumIterator;
 use indicatif::{ProgressBar, ProgressStyle};
 use orange_zest::{load_json, write_json, Zester};
 use orange_zest::api::Likes;
+use dotenv::dotenv;
+use std::env;
 use std::path::PathBuf;
 use std::fs::File;
 use std::io;
@@ -78,18 +80,61 @@ arg_enum! {
     }
 }
 
+#[derive(Debug)]
+enum Error {
+    OrangeZestError(orange_zest::Error),
+    VarError(std::env::VarError),
+    IoError(std::io::Error)
+}
+
+impl From<orange_zest::Error> for Error {
+    fn from(err: orange_zest::Error) -> Self {
+        Error::OrangeZestError(err)
+    }
+}
+
+impl From<std::env::VarError> for Error {
+    fn from(err: std::env::VarError) -> Self {
+        Error::VarError(err)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Error::IoError(err)
+    }
+}
+
+// Attempt to fill the given secrets from the terminal or the environment if they
+// are not already present
+fn ensure_secrets_present(oauth_token: &mut Option<String>, client_id: &mut Option<String>) -> Result<(), Error> {
+    if oauth_token.is_none() {
+        if let Ok(token) = env::var("OAUTH_TOKEN") {
+            *oauth_token = Some(token);
+        } else {
+            *oauth_token = Some(read_password_from_tty(Some("OAuth token: "))?);
+        }
+    }
+
+    if client_id.is_none() {
+        if let Ok(id) = env::var("CLIENT_ID") {
+            *client_id = Some(id);
+        } else {
+            *client_id = Some(read_password_from_tty(Some("Client ID: "))?);
+        }
+    }
+
+    Ok(())
+}
+
 // TODO: get rid of unwraps
 fn main() {
     let opt = Opts::from_args();
+    dotenv().ok();
 
     match opt {
         Opts::Json { mut oauth_token, mut client_id, all, pretty_print, output_folder, mut json_types } => {
-            if oauth_token.is_none() {
-                oauth_token = Some(read_password_from_tty(Some("OAuth token: ")).unwrap());
-            }
-            if client_id.is_none() {
-                client_id = Some(read_password_from_tty(Some("Client ID: ")).unwrap());
-            }
+            ensure_secrets_present(&mut oauth_token, &mut client_id).unwrap();
 
             // Manually stick all the possible types in the vector if the all flag
             // was set
@@ -147,12 +192,7 @@ fn main() {
         },
 
         Opts::Audio { mut oauth_token, mut client_id, all, output_folder, input_folder, mut audio_types } => {
-            if oauth_token.is_none() {
-                oauth_token = Some(read_password_from_tty(Some("OAuth token: ")).unwrap());
-            }
-            if client_id.is_none() {
-                client_id = Some(read_password_from_tty(Some("Client ID: ")).unwrap());
-            }
+            ensure_secrets_present(&mut oauth_token, &mut client_id).unwrap();
 
             // Manually stick all the possible types in the vector if the all flag
             // was set

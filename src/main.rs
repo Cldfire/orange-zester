@@ -79,6 +79,7 @@ arg_enum! {
     enum JsonType {
         Likes,
         Me,
+        Playlists,
     }
 }
 
@@ -194,6 +195,16 @@ fn main() -> Result<(), Error> {
                         write_json(&me, &path, pretty_print)?;
 
                         pb.println("Zested profile information");
+                    },
+                    JsonType::Playlists => {
+                        pb.set_message("Zesting playlists");
+
+                        let mut path = output_folder.clone();
+                        path.push("playlists.json");
+                        let playlists = zester.playlists()?;
+                        write_json(&playlists, &path, pretty_print)?;
+
+                        pb.println("Zested playlists");
                     }
                 }
             }

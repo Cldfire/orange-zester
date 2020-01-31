@@ -3,7 +3,7 @@ use structopt::clap::arg_enum;
 use rpassword::read_password_from_tty;
 use enum_iterator::IntoEnumIterator;
 use indicatif::{ProgressBar, ProgressStyle};
-use orange_zest::{load_json, write_json, Zester, PlaylistZestingEvent};
+use orange_zest::{load_json, write_json, Zester, PlaylistsZestingEvent, LikesZestingEvent};
 use orange_zest::api::Likes;
 use dotenv::dotenv;
 use std::thread;
@@ -171,6 +171,10 @@ fn main() -> Result<(), Error> {
             let bar_style = ProgressStyle::default_bar()
                 .tick_strings(tick_strings)
                 .progress_chars("#>-")
+                .template("{spinner:.blue} {msg:<34!} [{bar:30.cyan/blue}] ({pos}/{len}) ({eta})");
+            let bar_style_prefix = ProgressStyle::default_bar()
+                .tick_strings(tick_strings)
+                .progress_chars("#>-")
                 .template("{spinner:.blue} {prefix:.bold}\n{msg:<40!} [{bar:30.cyan/blue}] ({pos}/{len}) ({eta})");
 
             pb.set_style(
@@ -185,13 +189,25 @@ fn main() -> Result<(), Error> {
             for json_type in json_types {
                 match json_type {
                     JsonType::Likes => {
+                        use LikesZestingEvent::*;
+
+                        pb.set_style(bar_style.clone());
                         pb.set_message("Zesting likes");
+                        let total_likes_count = zester.me.as_ref().unwrap().likes_count.unwrap();
+                        pb.set_length(total_likes_count as u64);
 
                         let mut path = output_folder.clone();
                         path.push("likes.json");
-                        let likes = zester.likes()?;
+                        let likes = zester.likes(Some(|e| match e {
+                            MoreLikesInfoDownloaded { count } => {
+                                pb.inc(count as u64);
+                            }
+                        }))?;
                         write_json(&likes, &path, pretty_print)?;
 
+                        pb.reset();
+                        pb.set_style(spinner_style.clone());
+                        pb.set_length(!0);
                         pb.println("Zested likes");
                     },
                     JsonType::Me => {
@@ -205,9 +221,9 @@ fn main() -> Result<(), Error> {
                         pb.println("Zested profile information");
                     },
                     JsonType::Playlists => {
-                        use orange_zest::PlaylistZestingEvent::*;
+                        use orange_zest::PlaylistsZestingEvent::*;
 
-                        pb.set_style(bar_style.clone());
+                        pb.set_style(bar_style_prefix.clone());
                         pb.set_prefix("Zesting playlists");
                         pb.set_message("Getting list of playlists");
                         let total_playlist_count = zester.me.as_ref().unwrap().total_playlist_count();
@@ -215,14 +231,14 @@ fn main() -> Result<(), Error> {
 
                         let mut path = output_folder.clone();
                         path.push("playlists.json");
-                        let playlists = zester.playlists(Some(|e: PlaylistZestingEvent<'_>| match e {
+                        let playlists = zester.playlists(Some(|e: PlaylistsZestingEvent<'_>| match e {
                             MorePlaylistMetaInfoDownloaded { count } => {
                                 pb.inc(count as u64);
                             },
                             FinishPlaylistMetaInfoDownloading => {
                                 pb.set_message("");
                                 pb.reset();
-                            }
+                            },
                             StartPlaylistInfoDownload { playlist_meta } => {
                                 pb.set_message(playlist_meta.title.as_ref().unwrap());
                             },

@@ -201,6 +201,12 @@ fn main() -> Result<(), Error> {
                         let likes = zester.likes(Some(|e| match e {
                             MoreLikesInfoDownloaded { count } => {
                                 pb.inc(count as u64);
+                            },
+
+                            PausedAfterServerError { time_secs } => {
+                                pb.set_message(&format!("Server error, retrying after {}s", time_secs));
+                                thread::sleep(Duration::from_secs(time_secs));
+                                pb.set_message("Zesting likes");
                             }
                         }))?;
                         write_json(&likes, &path, pretty_print)?;
@@ -244,6 +250,9 @@ fn main() -> Result<(), Error> {
                             },
                             FinishPlaylistInfoDownload => {
                                 pb.inc(1);
+                            },
+                            PausedAfterServerError { time_secs } => {
+                                pb.set_message(&format!("Server error, retrying after {}s", time_secs));
                             }
                         }))?;
 

@@ -3,12 +3,10 @@ use structopt::clap::arg_enum;
 use rpassword::read_password_from_tty;
 use enum_iterator::IntoEnumIterator;
 use indicatif::{ProgressBar, ProgressStyle};
-use orange_zest::{load_json, write_json, Zester, PlaylistsZestingEvent, LikesZestingEvent};
-use orange_zest::api::Likes;
+use orange_zest::{write_json, Zester, PlaylistsZestingEvent, LikesZestingEvent, LikesAudioZestingEvent};
 use dotenv::dotenv;
 use std::thread;
 use std::time::Duration;
-use std::cmp::min;
 use std::env;
 use std::path::PathBuf;
 use std::fs;
@@ -53,7 +51,7 @@ enum Opts {
         client_id: Option<String>,
         /// Only get n most recent items
         #[structopt(short, long, value_name = "n")]
-        recent: Option<u32>,
+        recent: Option<u64>,
         /// Download all available audio (playlists, likes, etc.)
         #[structopt(short, long)]
         all: bool,
@@ -143,6 +141,34 @@ fn main() -> Result<(), Error> {
     let opt = Opts::from_args();
     dotenv().ok();
 
+    let pb = ProgressBar::new_spinner();
+    pb.enable_steady_tick(120);
+
+    let tick_strings = &[
+        "▹▹▹▹▹",
+        "▸▹▹▹▹",
+        "▹▸▹▹▹",
+        "▹▹▸▹▹",
+        "▹▹▹▸▹",
+        "▹▹▹▹▸",
+        "▪▪▪▪▪",
+    ];
+    let spinner_style = ProgressStyle::default_spinner()
+        .tick_strings(tick_strings)
+        .template("{spinner:.blue} {msg:.bold}");
+    let bar_style = ProgressStyle::default_bar()
+        .tick_strings(tick_strings)
+        .progress_chars("#>-")
+        .template("{spinner:.blue} {msg:<34!} [{bar:30.cyan/blue}] ({pos}/{len}) ({eta})");
+    let bar_style_prefix = ProgressStyle::default_bar()
+        .tick_strings(tick_strings)
+        .progress_chars("#>-")
+        .template("{spinner:.blue} {prefix:.bold}\n{msg:<40!} [{bar:30.cyan/blue}] ({pos}/{len}) ({eta})");
+
+    pb.set_style(
+        spinner_style.clone()
+    );
+
     match opt {
         Opts::Json { mut oauth_token, mut client_id, all, pretty_print, output_folder, mut json_types } => {
             ensure_secrets_present(&mut oauth_token, &mut client_id)?;
@@ -152,34 +178,6 @@ fn main() -> Result<(), Error> {
             if all {
                 json_types = JsonType::into_enum_iter().collect();
             }
-
-            let pb = ProgressBar::new_spinner();
-            pb.enable_steady_tick(120);
-
-            let tick_strings = &[
-                "▹▹▹▹▹",
-                "▸▹▹▹▹",
-                "▹▸▹▹▹",
-                "▹▹▸▹▹",
-                "▹▹▹▸▹",
-                "▹▹▹▹▸",
-                "▪▪▪▪▪",
-            ];
-            let spinner_style = ProgressStyle::default_spinner()
-                .tick_strings(tick_strings)
-                .template("{spinner:.blue} {msg:.bold}");
-            let bar_style = ProgressStyle::default_bar()
-                .tick_strings(tick_strings)
-                .progress_chars("#>-")
-                .template("{spinner:.blue} {msg:<34!} [{bar:30.cyan/blue}] ({pos}/{len}) ({eta})");
-            let bar_style_prefix = ProgressStyle::default_bar()
-                .tick_strings(tick_strings)
-                .progress_chars("#>-")
-                .template("{spinner:.blue} {prefix:.bold}\n{msg:<40!} [{bar:30.cyan/blue}] ({pos}/{len}) ({eta})");
-
-            pb.set_style(
-                spinner_style.clone()
-            );
 
             pb.set_message("Creating zester");
             let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap())?;
@@ -265,8 +263,6 @@ fn main() -> Result<(), Error> {
                     }
                 }
             }
-
-            pb.finish_with_message("Zesting complete");
         },
 
         Opts::Audio { mut oauth_token, mut client_id, recent, all, output_folder, input_folder, mut audio_types } => {
@@ -278,66 +274,68 @@ fn main() -> Result<(), Error> {
                 audio_types = AudioType::into_enum_iter().collect();
             }
 
+            // TODO: pull this block outside this match
+            // will need a second match to handle tokens first
+            pb.set_message("Creating zester");
             let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap())?;
+            pb.println("Zester created");
+            pb.set_message("");
 
             // Grab all the data we were asked to
             for audio_type in audio_types {
                 match audio_type {
                     AudioType::Likes => {
+                        use LikesAudioZestingEvent::*;
+
                         let mut input_file = input_folder.clone();
                         input_file.push("likes.json");
 
-                        // Complicated-looking error handling to display a nice message to
-                        // the user if there's no JSON data for likes in the expected
-                        // location
-                        let likes: Likes = match load_json(&input_file) {
-                            Ok(likes) => likes,
-                            Err(orange_zest::Error::IoError(e)) => match e.kind() {
-                                io::ErrorKind::NotFound => return Err(Error::JsonFileNotFound(input_file.to_str().unwrap().into())),
-                                _ => return Err(e.into())
-                            },
-                            Err(e) => return Err(e.into())
-                        };
-                        
                         let mut likes_folder = output_folder.clone();
                         likes_folder.push("likes/");
                         if !likes_folder.exists() {
                             fs::create_dir(&likes_folder)?;
                         }
 
-                        let download_num = min(recent.unwrap_or(std::u32::MAX) as usize, likes.collections.len());
+                        pb.set_style(bar_style_prefix.clone());
+                        pb.set_prefix("Zesting likes audio");
 
-                        let pb = ProgressBar::new(download_num as u64);
-                        pb.enable_steady_tick(120);
-                        pb.set_style(ProgressStyle::default_bar()
-                            .template("{spinner:.blue} {msg:<40!} [{bar:40.cyan/blue}] ({pos}/{len}) ({eta})")
-                            .progress_chars("#>-"));
+                        zester.likes_audio(input_file, recent.unwrap_or(std::u64::MAX), |e| match e {
+                            NumTracksToDownload { num } => {
+                                pb.set_length(num);
+                            },
 
-                        for track in likes.collections
-                            .iter()
-                            .map(|c| &c.track)
-                            .take(download_num)
-                        {
-                            let mut output_file = likes_folder.clone();
-                            let title = track.title.as_ref().unwrap();
-                            output_file.push(format!("{} (id={}).m4a", title, track.id.unwrap()));
-                            pb.set_message(title);
+                            StartTrackDownload { track_info } => {
+                                pb.set_message(track_info.title.as_ref().unwrap());
+                            },
 
-                            let mut file = File::create(&output_file)?;
-                            // TODO: gonna need to watch for 500s, pause, and then start downloading again
-                            io::copy(&mut track.download(&zester)?, &mut file)?;
-                            pb.inc(1);
+                            FinishTrackDownload { track_info, mut track_data } => {
+                                let mut output_file = likes_folder.clone();
+                                let title = track_info.title.as_ref().unwrap();
+                                output_file.push(format!("{} (id={}).m4a", title, track_info.id.unwrap()));
 
-                            // sleep to attempt to avoid 500s
-                            thread::sleep(Duration::from_secs(2));
-                        }
+                                // TODO: handle errors
+                                let mut file = File::create(&output_file).unwrap();
+                                io::copy(&mut track_data, &mut file).unwrap();
+                                pb.inc(1);
+                            },
 
-                        pb.finish_with_message(&format!("{:<40}", "Zested audio tracks from likes"));
+                            PausedAfterServerError { time_secs } => {
+                                pb.set_message(&format!("Server error, retrying after {}s", time_secs));
+                            }
+                        })?;
+
+                        // TODO: test json not being present
+
+                        pb.reset();
+                        pb.set_style(spinner_style.clone());
+                        pb.set_length(!0);
+                        pb.println("Zested audio tracks from likes");
                     }
                 }
             }
         }
     }
 
+    pb.finish_with_message("Zesting complete");
     Ok(())
 }

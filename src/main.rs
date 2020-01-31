@@ -3,7 +3,7 @@ use structopt::clap::arg_enum;
 use rpassword::read_password_from_tty;
 use enum_iterator::IntoEnumIterator;
 use indicatif::{ProgressBar, ProgressStyle};
-use orange_zest::{load_json, write_json, Zester};
+use orange_zest::{load_json, write_json, Zester, PlaylistZestingEvent};
 use orange_zest::api::Likes;
 use dotenv::dotenv;
 use std::thread;
@@ -155,18 +155,26 @@ fn main() -> Result<(), Error> {
 
             let pb = ProgressBar::new_spinner();
             pb.enable_steady_tick(120);
+
+            let tick_strings = &[
+                "▹▹▹▹▹",
+                "▸▹▹▹▹",
+                "▹▸▹▹▹",
+                "▹▹▸▹▹",
+                "▹▹▹▸▹",
+                "▹▹▹▹▸",
+                "▪▪▪▪▪",
+            ];
+            let spinner_style = ProgressStyle::default_spinner()
+                .tick_strings(tick_strings)
+                .template("{spinner:.blue} {msg:.bold}");
+            let bar_style = ProgressStyle::default_bar()
+                .tick_strings(tick_strings)
+                .progress_chars("#>-")
+                .template("{spinner:.blue} {prefix:.bold}\n{msg:<40!} [{bar:30.cyan/blue}] ({pos}/{len}) ({eta})");
+
             pb.set_style(
-                ProgressStyle::default_spinner()
-                    .tick_strings(&[
-                        "▹▹▹▹▹",
-                        "▸▹▹▹▹",
-                        "▹▸▹▹▹",
-                        "▹▹▸▹▹",
-                        "▹▹▹▸▹",
-                        "▹▹▹▹▸",
-                        "▪▪▪▪▪",
-                    ])
-                    .template("{spinner:.blue} {msg}"),
+                spinner_style.clone()
             );
 
             pb.set_message("Creating zester");
@@ -197,13 +205,37 @@ fn main() -> Result<(), Error> {
                         pb.println("Zested profile information");
                     },
                     JsonType::Playlists => {
-                        pb.set_message("Zesting playlists");
+                        use orange_zest::PlaylistZestingEvent::*;
+
+                        pb.set_style(bar_style.clone());
+                        pb.set_prefix("Zesting playlists");
+                        pb.set_message("Getting list of playlists");
+                        let total_playlist_count = zester.me.as_ref().unwrap().total_playlist_count();
+                        pb.set_length(total_playlist_count as u64);
 
                         let mut path = output_folder.clone();
                         path.push("playlists.json");
-                        let playlists = zester.playlists()?;
+                        let playlists = zester.playlists(Some(|e: PlaylistZestingEvent<'_>| match e {
+                            MorePlaylistMetaInfoDownloaded { count } => {
+                                pb.inc(count as u64);
+                            },
+                            FinishPlaylistMetaInfoDownloading => {
+                                pb.set_message("");
+                                pb.reset();
+                            }
+                            StartPlaylistInfoDownload { playlist_meta } => {
+                                pb.set_message(playlist_meta.title.as_ref().unwrap());
+                            },
+                            FinishPlaylistInfoDownload => {
+                                pb.inc(1);
+                            }
+                        }))?;
+
                         write_json(&playlists, &path, pretty_print)?;
 
+                        pb.reset();
+                        pb.set_style(spinner_style.clone());
+                        pb.set_length(!0);
                         pb.println("Zested playlists");
                     }
                 }
@@ -253,7 +285,7 @@ fn main() -> Result<(), Error> {
                         let pb = ProgressBar::new(download_num as u64);
                         pb.enable_steady_tick(120);
                         pb.set_style(ProgressStyle::default_bar()
-                            .template("{spinner:.blue} {msg} [{bar:40.cyan/blue}] ({pos}/{len}) ({eta})")
+                            .template("{spinner:.blue} {msg:<40!} [{bar:40.cyan/blue}] ({pos}/{len}) ({eta})")
                             .progress_chars("#>-"));
 
                         for track in likes.collections
@@ -264,11 +296,7 @@ fn main() -> Result<(), Error> {
                             let mut output_file = likes_folder.clone();
                             let title = track.title.as_ref().unwrap();
                             output_file.push(format!("{} (id={}).m4a", title, track.id.unwrap()));
-                            pb.set_message(&format!("{:<40}", if title.len() < 38 {
-                                title.into()
-                            } else {
-                                format!("{}...", &title[0..37])
-                            }));
+                            pb.set_message(title);
 
                             let mut file = File::create(&output_file)?;
                             // TODO: gonna need to watch for 500s, pause, and then start downloading again

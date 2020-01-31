@@ -308,7 +308,7 @@ fn main() -> Result<(), Error> {
                         pb.set_style(bar_style_prefix.clone());
                         pb.set_prefix("Zesting likes audio");
 
-                        zester.likes_audio(input_file, recent.unwrap_or(std::u64::MAX), |e| match e {
+                        match zester.likes_audio(&input_file, recent.unwrap_or(std::u64::MAX), |e| match e {
                             NumTracksToDownload { num } => {
                                 pb.set_length(num);
                             },
@@ -331,9 +331,19 @@ fn main() -> Result<(), Error> {
                             PausedAfterServerError { time_secs } => {
                                 pb.set_message(&format!("Server error, retrying after {}s", time_secs));
                             }
-                        })?;
-
-                        // TODO: test json not being present
+                        }) {
+                            Ok(_) => {},
+                            // We want to display a nicer error if the JSON file isn't present in the
+                            // provided input folder
+                            //
+                            // (This way the user immediately sees it's an issue regarding the JSON
+                            // file and the name of the file that we're looking for.)
+                            Err(orange_zest::Error::IoError(e)) => match e.kind() {
+                                io::ErrorKind::NotFound => return Err(Error::JsonFileNotFound(input_file.to_str().unwrap().into())),
+                                _ => return Err(e.into())
+                            },
+                            Err(e) => return Err(e.into())
+                        }
 
                         pb.reset();
                         pb.set_style(spinner_style.clone());

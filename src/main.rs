@@ -4,9 +4,11 @@ use rpassword::read_password_from_tty;
 use enum_iterator::IntoEnumIterator;
 use indicatif::{ProgressBar, ProgressStyle};
 use orange_zest::{write_json, Zester};
+use orange_zest::api::{Likes, Playlists};
 use orange_zest::events::*;
 use dotenv::dotenv;
 use std::thread;
+use std::cell::RefCell;
 use std::time::Duration;
 use std::env;
 use std::path::PathBuf;
@@ -98,6 +100,7 @@ arg_enum! {
     #[derive(Debug, IntoEnumIterator)]
     enum AudioType {
         Likes,
+        Playlists
     }
 }
 
@@ -211,8 +214,7 @@ fn main() -> Result<(), Error> {
                         let total_likes_count = zester.me.as_ref().unwrap().likes_count.unwrap();
                         pb.set_length(total_likes_count as u64);
 
-                        let mut path = output_folder.clone();
-                        path.push("likes.json");
+                        let path = output_folder.join("likes.json");
                         let likes = zester.likes(Some(|e| match e {
                             MoreLikesInfoDownloaded { count } => {
                                 pb.inc(count as u64);
@@ -234,8 +236,7 @@ fn main() -> Result<(), Error> {
                     JsonType::Me => {
                         pb.set_message("Zesting profile information");
 
-                        let mut path = output_folder.clone();
-                        path.push("me.json");
+                        let path = output_folder.join("me.json");
                         let me = zester.me()?;
                         write_json(&me, &path, pretty_print)?;
 
@@ -250,8 +251,7 @@ fn main() -> Result<(), Error> {
                         let total_playlist_count = zester.me.as_ref().unwrap().total_playlist_count();
                         pb.set_length(total_playlist_count as u64);
 
-                        let mut path = output_folder.clone();
-                        path.push("playlists.json");
+                        let path = output_folder.join("playlists.json");
                         let playlists = zester.playlists(Some(|e: PlaylistsZestingEvent<'_>| match e {
                             MorePlaylistMetaInfoDownloaded { count } => {
                                 pb.inc(count as u64);
@@ -263,7 +263,7 @@ fn main() -> Result<(), Error> {
                             StartPlaylistInfoDownload { playlist_meta } => {
                                 pb.set_message(playlist_meta.title.as_ref().unwrap());
                             },
-                            FinishPlaylistInfoDownload => {
+                            FinishPlaylistInfoDownload { .. } => {
                                 pb.inc(1);
                             },
                             PausedAfterServerError { time_secs } => {
@@ -289,26 +289,26 @@ fn main() -> Result<(), Error> {
                 audio_types = AudioType::into_enum_iter().collect();
             }
             pb.set_message("");
+            pb.set_style(bar_style_prefix.clone());
+
+            let recent = recent.unwrap_or(std::u64::MAX);
 
             // Grab all the data we were asked to
             for audio_type in audio_types {
                 match audio_type {
                     AudioType::Likes => {
-                        use LikesAudioZestingEvent::*;
+                        use TracksAudioZestingEvent::*;
+                        
+                        let input_file = input_folder.join("likes.json");
+                        let likes: Likes = orange_zest::load_json(&input_file)?;
 
-                        let mut input_file = input_folder.clone();
-                        input_file.push("likes.json");
-
-                        let mut likes_folder = output_folder.clone();
-                        likes_folder.push("likes/");
+                        let likes_folder = output_folder.join("likes/");
                         if !likes_folder.exists() {
                             fs::create_dir(&likes_folder)?;
                         }
-
-                        pb.set_style(bar_style_prefix.clone());
                         pb.set_prefix("Zesting likes audio");
 
-                        match zester.likes_audio(&input_file, recent.unwrap_or(std::u64::MAX), |e| match e {
+                        match zester.likes_audio(&likes, recent, |e| match e {
                             NumTracksToDownload { num } => {
                                 pb.set_length(num);
                             },
@@ -318,9 +318,8 @@ fn main() -> Result<(), Error> {
                             },
 
                             FinishTrackDownload { track_info, mut track_data } => {
-                                let mut output_file = likes_folder.clone();
                                 let title = track_info.title.as_ref().unwrap();
-                                output_file.push(format!("{} (id={}).m4a", title, track_info.id.unwrap()));
+                                let output_file = likes_folder.join(format!("{} (id={}).m4a", title, track_info.id.unwrap()));
 
                                 match File::create(&output_file) {
                                     Ok(mut f) => match io::copy(&mut track_data, &mut f) {
@@ -339,6 +338,104 @@ fn main() -> Result<(), Error> {
 
                             PausedAfterServerError { time_secs } => {
                                 pb.set_message(&format!("Server error, retrying after {}s", time_secs));
+                            }
+                        }) {
+                            Ok(_) => {},
+                            // We want to display a nicer error if the JSON file isn't present in the
+                            // provided input folder
+                            //
+                            // (This way the user immediately sees it's an issue regarding the JSON
+                            // file and the name of the file that we're looking for.)
+                            Err(orange_zest::Error::IoError(e)) => match e.kind() {
+                                io::ErrorKind::NotFound => return Err(Error::JsonFileNotFound(input_file.to_str().unwrap().into())),
+                                _ => return Err(e.into())
+                            },
+                            Err(e) => return Err(e.into())
+                        }
+
+                        pb.reset();
+                        pb.set_style(spinner_style.clone());
+                        pb.set_length(!0);
+                        pb.println("Zested audio tracks from likes");
+                    },
+                    
+                    // TODO: currently lots of tracks in playlists are missing media info, need to fix that
+                    AudioType::Playlists => {
+                        use PlaylistsAudioZestingEvent::*;
+                        use TracksAudioZestingEvent::*;
+                        
+                        let input_file = input_folder.join("playlists.json");
+                        let playlists: Playlists = orange_zest::load_json(&input_file)?;
+                        // We need these refcells to track additional state for the progressbar
+                        // that we can mutate from inside the Fn below
+                        let playlist_curr = RefCell::new(1);
+                        let playlist_total = RefCell::new(!0);
+
+                        let playlists_folder = output_folder.join("playlists/");
+                        if !playlists_folder.exists() {
+                            fs::create_dir(&playlists_folder)?;
+                        }
+                        pb.set_prefix("Zesting playlists audio");
+
+                        match zester.playlists_audio(playlists.playlists.iter().take(recent as usize), |e| match e {
+                            NumItemsToDownload { playlists_num, tracks_num } => {
+                                *playlist_total.borrow_mut() = playlists_num;
+                                pb.set_length(tracks_num);
+                            },
+
+                            StartPlaylistDownload { playlist_info } => {
+                                pb.set_prefix(&format!(
+                                    "Zesting playlists audio - ({}/{}) {}",
+                                    playlist_curr.borrow(),
+                                    playlist_total.borrow(),
+                                    playlist_info.title.as_ref().unwrap()
+                                ));
+                            }
+
+                            TrackEvent(NumTracksToDownload { .. }, _) => {},
+
+                            TrackEvent(StartTrackDownload { track_info }, _) => {
+                                pb.set_message(track_info.title.as_ref().unwrap());
+                            },
+
+                            TrackEvent(FinishTrackDownload { track_info, mut track_data }, playlist_info) => {
+                                let track_title = track_info.title.as_ref().unwrap();
+                                let playlist_title = playlist_info.title.as_ref().unwrap();
+                                let output_file = playlists_folder.join(format!(
+                                    "{} (id={})/{} (id={}).m4a",
+                                    playlist_title,
+                                    playlist_info.id.unwrap(),
+                                    track_title,
+                                    track_info.id.unwrap()
+                                ));
+
+                                match File::create(&output_file) {
+                                    Ok(mut f) => match io::copy(&mut track_data, &mut f) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            pb.println(&format!("  [warning] Failed to write \"{}\" to file: {}", &track_title, e));
+                                        }
+                                    },
+                                    Err(e) => {
+                                        pb.println(&format!("  [warning] Failed to create {}: {}", output_file.display(), e));
+                                    }
+                                };
+
+                                pb.inc(1);
+                            },
+
+                            TrackEvent(PausedAfterServerError { time_secs }, _) => {
+                                pb.set_message(&format!("Server error, retrying after {}s", time_secs));
+                            },
+
+                            FinishPlaylistDownload { playlist_info } => {
+                                *playlist_curr.borrow_mut() += 1;
+                                pb.set_prefix(&format!(
+                                    "Zesting playlists audio - ({}/{}) {}",
+                                    playlist_curr.borrow(),
+                                    playlist_total.borrow(),
+                                    playlist_info.title.as_ref().unwrap()
+                                ));
                             }
                         }) {
                             Ok(_) => {},

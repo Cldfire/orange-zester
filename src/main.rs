@@ -3,7 +3,8 @@ use structopt::clap::arg_enum;
 use rpassword::read_password_from_tty;
 use enum_iterator::IntoEnumIterator;
 use indicatif::{ProgressBar, ProgressStyle};
-use orange_zest::{write_json, Zester, PlaylistsZestingEvent, LikesZestingEvent, LikesAudioZestingEvent};
+use orange_zest::{write_json, Zester};
+use orange_zest::events::*;
 use dotenv::dotenv;
 use std::thread;
 use std::time::Duration;
@@ -69,6 +70,18 @@ enum Opts {
             min_values = 1
         )]
         audio_types: Vec<AudioType>
+    }
+}
+
+impl Opts {
+    /// Takes the tokens out of this `Opts` instance and hands them to you.
+    fn tokens(&mut self) -> (Option<String>, Option<String>) {
+        match self {
+            Opts::Json { oauth_token, client_id, .. } => 
+                (oauth_token.take(), client_id.take()),
+            Opts::Audio { oauth_token, client_id, .. } => 
+                (oauth_token.take(), client_id.take())
+        }
     }
 }
 
@@ -138,7 +151,7 @@ fn ensure_secrets_present(oauth_token: &mut Option<String>, client_id: &mut Opti
 }
 
 fn main() -> Result<(), Error> {
-    let opt = Opts::from_args();
+    let mut opt = Opts::from_args();
     dotenv().ok();
 
     let pb = ProgressBar::new_spinner();
@@ -169,19 +182,23 @@ fn main() -> Result<(), Error> {
         spinner_style.clone()
     );
 
-    match opt {
-        Opts::Json { mut oauth_token, mut client_id, all, pretty_print, output_folder, mut json_types } => {
-            ensure_secrets_present(&mut oauth_token, &mut client_id)?;
+    let zester;
+    {
+        let (mut oauth_token, mut client_id) = opt.tokens();
+        ensure_secrets_present(&mut oauth_token, &mut client_id)?;
 
+        pb.set_message("Creating zester");
+        zester = Zester::new(oauth_token.unwrap(), client_id.unwrap())?;
+        pb.println("Zester created");
+    }
+
+    match opt {
+        Opts::Json { all, pretty_print, output_folder, mut json_types, .. } => {
             // Manually stick all the possible types in the vector if the all flag
             // was set
             if all {
                 json_types = JsonType::into_enum_iter().collect();
             }
-
-            pb.set_message("Creating zester");
-            let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap())?;
-            pb.println("Zester created");
 
             // Grab all the data we were asked to
             for json_type in json_types {
@@ -225,7 +242,7 @@ fn main() -> Result<(), Error> {
                         pb.println("Zested profile information");
                     },
                     JsonType::Playlists => {
-                        use orange_zest::PlaylistsZestingEvent::*;
+                        use PlaylistsZestingEvent::*;
 
                         pb.set_style(bar_style_prefix.clone());
                         pb.set_prefix("Zesting playlists");
@@ -265,20 +282,12 @@ fn main() -> Result<(), Error> {
             }
         },
 
-        Opts::Audio { mut oauth_token, mut client_id, recent, all, output_folder, input_folder, mut audio_types } => {
-            ensure_secrets_present(&mut oauth_token, &mut client_id)?;
-
+        Opts::Audio { recent, all, output_folder, input_folder, mut audio_types, .. } => {
             // Manually stick all the possible types in the vector if the all flag
             // was set
             if all {
                 audio_types = AudioType::into_enum_iter().collect();
             }
-
-            // TODO: pull this block outside this match
-            // will need a second match to handle tokens first
-            pb.set_message("Creating zester");
-            let zester = Zester::new(oauth_token.unwrap(), client_id.unwrap())?;
-            pb.println("Zester created");
             pb.set_message("");
 
             // Grab all the data we were asked to

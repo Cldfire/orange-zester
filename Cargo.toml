@@ -10,6 +10,7 @@ edition = "2018"
 orange-zest = { path = "../orange-zest/" }
 enum-iterator = "0.5"
 indicatif = "0.13"
+sanitize-filename = "0.2"
 dotenv = "0.15"
 structopt = "0.3"
 rpassword = "4.0"

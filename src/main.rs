@@ -153,6 +153,17 @@ fn ensure_secrets_present(oauth_token: &mut Option<String>, client_id: &mut Opti
     Ok(())
 }
 
+// Sanitize the given filename for storage across different OS's
+fn sanitize<S: AsRef<str>>(name: S) -> String {
+    sanitize_filename::sanitize_with_options(
+        name,
+        sanitize_filename::Options {
+            windows: true,
+            .. Default::default()
+        }
+    )
+}
+
 fn main() -> Result<(), Error> {
     let mut opt = Opts::from_args();
     dotenv().ok();
@@ -385,7 +396,7 @@ fn main() -> Result<(), Error> {
 
                             StartPlaylistDownload { playlist_info } => {
                                 pb.set_prefix(&format!(
-                                    "Zesting playlists audio - ({}/{}) {}",
+                                    "Zesting playlists audio ({}/{}) - {}",
                                     playlist_curr.borrow(),
                                     playlist_total.borrow(),
                                     playlist_info.title.as_ref().unwrap()
@@ -401,13 +412,23 @@ fn main() -> Result<(), Error> {
                             TrackEvent(FinishTrackDownload { track_info, mut track_data }, playlist_info) => {
                                 let track_title = track_info.title.as_ref().unwrap();
                                 let playlist_title = playlist_info.title.as_ref().unwrap();
-                                let output_file = playlists_folder.join(format!(
-                                    "{} (id={})/{} (id={}).m4a",
+                                
+                                // TODO: sanitize elsewhere as well
+                                let playlist_folder = playlists_folder.join(sanitize(format!(
+                                    "{} (id={})",
                                     playlist_title,
                                     playlist_info.id.unwrap(),
+                                )));
+                                if !playlist_folder.exists() {
+                                    // TODO: don't unwrap
+                                    fs::create_dir(&playlist_folder).unwrap();
+                                }
+
+                                let output_file = playlist_folder.join(sanitize(format!(
+                                    "{} (id={}).m4a",
                                     track_title,
                                     track_info.id.unwrap()
-                                ));
+                                )));
 
                                 match File::create(&output_file) {
                                     Ok(mut f) => match io::copy(&mut track_data, &mut f) {
@@ -431,7 +452,7 @@ fn main() -> Result<(), Error> {
                             FinishPlaylistDownload { playlist_info } => {
                                 *playlist_curr.borrow_mut() += 1;
                                 pb.set_prefix(&format!(
-                                    "Zesting playlists audio - ({}/{}) {}",
+                                    "Zesting playlists audio ({}/{}) - {}",
                                     playlist_curr.borrow(),
                                     playlist_total.borrow(),
                                     playlist_info.title.as_ref().unwrap()
@@ -454,7 +475,7 @@ fn main() -> Result<(), Error> {
                         pb.reset();
                         pb.set_style(spinner_style.clone());
                         pb.set_length(!0);
-                        pb.println("Zested audio tracks from likes");
+                        pb.println("Zested audio tracks from playlists");
                     }
                 }
             }

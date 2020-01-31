@@ -322,9 +322,18 @@ fn main() -> Result<(), Error> {
                                 let title = track_info.title.as_ref().unwrap();
                                 output_file.push(format!("{} (id={}).m4a", title, track_info.id.unwrap()));
 
-                                // TODO: handle errors
-                                let mut file = File::create(&output_file).unwrap();
-                                io::copy(&mut track_data, &mut file).unwrap();
+                                match File::create(&output_file) {
+                                    Ok(mut f) => match io::copy(&mut track_data, &mut f) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            pb.println(&format!("  [warning] Failed to write \"{}\" to file: {}", &title, e));
+                                        }
+                                    },
+                                    Err(e) => {
+                                        pb.println(&format!("  [warning] Failed to create {}: {}", output_file.display(), e));
+                                    }
+                                };
+
                                 pb.inc(1);
                             },
 

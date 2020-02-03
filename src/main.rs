@@ -330,7 +330,11 @@ fn main() -> Result<(), Error> {
 
                             FinishTrackDownload { track_info, mut track_data } => {
                                 let title = track_info.title.as_ref().unwrap();
-                                let output_file = likes_folder.join(format!("{} (id={}).m4a", title, track_info.id.unwrap()));
+                                let output_file = likes_folder.join(sanitize(format!(
+                                    "{} (id={}).m4a",
+                                    title,
+                                    track_info.id.unwrap()
+                                )));
 
                                 match File::create(&output_file) {
                                     Ok(mut f) => match io::copy(&mut track_data, &mut f) {
@@ -369,8 +373,7 @@ fn main() -> Result<(), Error> {
                         pb.set_length(!0);
                         pb.println("Zested audio tracks from likes");
                     },
-                    
-                    // TODO: currently lots of tracks in playlists are missing media info, need to fix that
+
                     AudioType::Playlists => {
                         use PlaylistsAudioZestingEvent::*;
                         use TracksAudioZestingEvent::*;
@@ -412,8 +415,7 @@ fn main() -> Result<(), Error> {
                             TrackEvent(FinishTrackDownload { track_info, mut track_data }, playlist_info) => {
                                 let track_title = track_info.title.as_ref().unwrap();
                                 let playlist_title = playlist_info.title.as_ref().unwrap();
-                                
-                                // TODO: sanitize elsewhere as well
+
                                 let playlist_folder = playlists_folder.join(sanitize(format!(
                                     "{} (id={})",
                                     playlist_title,

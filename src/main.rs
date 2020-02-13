@@ -164,6 +164,18 @@ fn sanitize<S: AsRef<str>>(name: S) -> String {
     )
 }
 
+// If the given generic error is an `io::ErrorKind::NotFound`, turn it into a
+// `JsonFileNotFound`.
+fn specific_json_err(generic_err: orange_zest::Error, filepath: String) -> Error {
+    match generic_err {
+        orange_zest::Error::IoError(e) => match e.kind() {
+            io::ErrorKind::NotFound => Error::JsonFileNotFound(filepath),
+            _ => e.into()
+        },
+        _ => generic_err.into()
+    }
+}
+
 fn main() -> Result<(), Error> {
     let mut opt = Opts::from_args();
     dotenv().ok();
@@ -226,7 +238,7 @@ fn main() -> Result<(), Error> {
                         pb.set_length(total_likes_count as u64);
 
                         let path = output_folder.join("likes.json");
-                        let likes = zester.likes(Some(|e| match e {
+                        let likes = zester.likes(|e| match e {
                             MoreLikesInfoDownloaded { count } => {
                                 pb.inc(count as u64);
                             },
@@ -236,7 +248,7 @@ fn main() -> Result<(), Error> {
                                 thread::sleep(Duration::from_secs(time_secs));
                                 pb.set_message("Zesting likes");
                             }
-                        }))?;
+                        })?;
                         write_json(&likes, &path, pretty_print)?;
 
                         pb.reset();
@@ -263,7 +275,7 @@ fn main() -> Result<(), Error> {
                         pb.set_length(total_playlist_count as u64);
 
                         let path = output_folder.join("playlists.json");
-                        let playlists = zester.playlists(Some(|e: PlaylistsZestingEvent<'_>| match e {
+                        let playlists = zester.playlists(|e: PlaylistsZestingEvent<'_>| match e {
                             MorePlaylistMetaInfoDownloaded { count } => {
                                 pb.inc(count as u64);
                             },
@@ -280,7 +292,7 @@ fn main() -> Result<(), Error> {
                             PausedAfterServerError { time_secs } => {
                                 pb.set_message(&format!("Server error, retrying after {}s", time_secs));
                             }
-                        }))?;
+                        })?;
 
                         write_json(&playlists, &path, pretty_print)?;
 
@@ -311,7 +323,8 @@ fn main() -> Result<(), Error> {
                         use TracksAudioZestingEvent::*;
                         
                         let input_file = input_folder.join("likes.json");
-                        let likes: Likes = orange_zest::load_json(&input_file)?;
+                        let likes: Likes = orange_zest::load_json(&input_file)
+                            .map_err(|e| specific_json_err(e, input_file.to_str().unwrap().into()))?;
 
                         let likes_folder = output_folder.join("likes/");
                         if !likes_folder.exists() {
@@ -319,7 +332,7 @@ fn main() -> Result<(), Error> {
                         }
                         pb.set_prefix("Zesting likes audio");
 
-                        match zester.likes_audio(&likes, recent, |e| match e {
+                        zester.likes_audio(&likes, recent, |e| match e {
                             NumTracksToDownload { num } => {
                                 pb.set_length(num);
                             },
@@ -354,19 +367,7 @@ fn main() -> Result<(), Error> {
                             PausedAfterServerError { time_secs } => {
                                 pb.set_message(&format!("Server error, retrying after {}s", time_secs));
                             }
-                        }) {
-                            Ok(_) => {},
-                            // We want to display a nicer error if the JSON file isn't present in the
-                            // provided input folder
-                            //
-                            // (This way the user immediately sees it's an issue regarding the JSON
-                            // file and the name of the file that we're looking for.)
-                            Err(orange_zest::Error::IoError(e)) => match e.kind() {
-                                io::ErrorKind::NotFound => return Err(Error::JsonFileNotFound(input_file.to_str().unwrap().into())),
-                                _ => return Err(e.into())
-                            },
-                            Err(e) => return Err(e.into())
-                        }
+                        })?;
 
                         pb.reset();
                         pb.set_style(spinner_style.clone());
@@ -379,7 +380,8 @@ fn main() -> Result<(), Error> {
                         use TracksAudioZestingEvent::*;
                         
                         let input_file = input_folder.join("playlists.json");
-                        let playlists: Playlists = orange_zest::load_json(&input_file)?;
+                        let playlists: Playlists = orange_zest::load_json(&input_file)
+                            .map_err(|e| specific_json_err(e, input_file.to_str().unwrap().into()))?;
                         // We need these refcells to track additional state for the progressbar
                         // that we can mutate from inside the Fn below
                         let playlist_curr = RefCell::new(1);
@@ -391,7 +393,7 @@ fn main() -> Result<(), Error> {
                         }
                         pb.set_prefix("Zesting playlists audio");
 
-                        match zester.playlists_audio(playlists.playlists.iter().take(recent as usize), |e| match e {
+                        zester.playlists_audio(playlists.playlists.iter().take(recent as usize), |e| match e {
                             NumItemsToDownload { playlists_num, tracks_num } => {
                                 *playlist_total.borrow_mut() = playlists_num;
                                 pb.set_length(tracks_num);
@@ -460,19 +462,7 @@ fn main() -> Result<(), Error> {
                                     playlist_info.title.as_ref().unwrap()
                                 ));
                             }
-                        }) {
-                            Ok(_) => {},
-                            // We want to display a nicer error if the JSON file isn't present in the
-                            // provided input folder
-                            //
-                            // (This way the user immediately sees it's an issue regarding the JSON
-                            // file and the name of the file that we're looking for.)
-                            Err(orange_zest::Error::IoError(e)) => match e.kind() {
-                                io::ErrorKind::NotFound => return Err(Error::JsonFileNotFound(input_file.to_str().unwrap().into())),
-                                _ => return Err(e.into())
-                            },
-                            Err(e) => return Err(e.into())
-                        }
+                        })?;
 
                         pb.reset();
                         pb.set_style(spinner_style.clone());

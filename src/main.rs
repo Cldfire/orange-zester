@@ -11,10 +11,11 @@ use std::thread;
 use std::cell::RefCell;
 use std::time::Duration;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::fs;
 use std::fs::File;
 use std::io;
+use std::io::Read;
 
 #[derive(StructOpt, Debug)]
 enum Opts {
@@ -174,6 +175,23 @@ fn specific_json_err(generic_err: orange_zest::Error, filepath: String) -> Error
         },
         _ => generic_err.into()
     }
+}
+
+// Streams the given `Read` instance to the given file path.
+//
+// Handles pretty-printing relevant errors.
+fn stream_track_to_file<P: AsRef<Path>>(path: P, track_title: &str, pb: &ProgressBar, mut data: impl Read) {
+    match File::create(path.as_ref()) {
+        Ok(mut f) => match io::copy(&mut data, &mut f) {
+            Ok(_) => {},
+            Err(e) => {
+                pb.println(&format!("  [warning] Failed to write \"{}\" to file: {}", track_title, e));
+            }
+        },
+        Err(e) => {
+            pb.println(&format!("  [warning] Failed to create {}: {}", path.as_ref().display(), e));
+        }
+    };
 }
 
 fn main() -> Result<(), Error> {
@@ -349,18 +367,7 @@ fn main() -> Result<(), Error> {
                                     track_info.id.unwrap()
                                 )));
 
-                                match File::create(&output_file) {
-                                    Ok(mut f) => match io::copy(&mut track_data, &mut f) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            pb.println(&format!("  [warning] Failed to write \"{}\" to file: {}", &title, e));
-                                        }
-                                    },
-                                    Err(e) => {
-                                        pb.println(&format!("  [warning] Failed to create {}: {}", output_file.display(), e));
-                                    }
-                                };
-
+                                stream_track_to_file(&output_file, &title, &pb, &mut track_data);
                                 pb.inc(1);
                             },
 
@@ -434,18 +441,7 @@ fn main() -> Result<(), Error> {
                                     track_info.id.unwrap()
                                 )));
 
-                                match File::create(&output_file) {
-                                    Ok(mut f) => match io::copy(&mut track_data, &mut f) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            pb.println(&format!("  [warning] Failed to write \"{}\" to file: {}", &track_title, e));
-                                        }
-                                    },
-                                    Err(e) => {
-                                        pb.println(&format!("  [warning] Failed to create {}: {}", output_file.display(), e));
-                                    }
-                                };
-
+                                stream_track_to_file(&output_file, &track_title, &pb, &mut track_data);
                                 pb.inc(1);
                             },
 

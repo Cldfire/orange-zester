@@ -307,6 +307,22 @@ fn main() -> Result<(), Error> {
                             FinishPlaylistInfoDownload { .. } => {
                                 pb.inc(1);
                             },
+                            PlaylistInfoDownloadError { playlist_meta, err } => {
+                                pb.println(format!(
+                                    "  [warning] failed to get info for {}: {:?}",
+                                    playlist_meta.title.as_ref().unwrap(),
+                                    err
+                                ));
+                                pb.inc(1);
+                            },
+                            PlaylistInfoCompletionError { playlist_meta, err } => {
+                                pb.println(format!(
+                                    "  [warning] failed to complete info for {}: {:?}",
+                                    playlist_meta.title.as_ref().unwrap(),
+                                    err
+                                ));
+                                pb.inc(1);
+                            }
                             PausedAfterServerError { time_secs } => {
                                 pb.set_message(&format!("Server error, retrying after {}s", time_secs));
                             }
@@ -368,6 +384,15 @@ fn main() -> Result<(), Error> {
                                 )));
 
                                 stream_track_to_file(&output_file, &title, &pb, &mut track_data);
+                                pb.inc(1);
+                            },
+
+                            TrackDownloadError { track_info, err } => {
+                                pb.println(format!(
+                                    "  [warning] failed to download {} {:?}",
+                                    track_info.title.as_ref().unwrap(),
+                                    err
+                                ));
                                 pb.inc(1);
                             },
 
@@ -442,6 +467,16 @@ fn main() -> Result<(), Error> {
                                 )));
 
                                 stream_track_to_file(&output_file, &track_title, &pb, &mut track_data);
+                                pb.inc(1);
+                            },
+
+                            TrackEvent(TrackDownloadError { track_info, err }, playlist_info) => {
+                                pb.println(format!(
+                                    "  [warning] failed to download {} (in {}): {:?}",
+                                    track_info.title.as_ref().unwrap(),
+                                    playlist_info.title.as_ref().unwrap(),
+                                    err
+                                ));
                                 pb.inc(1);
                             },
 

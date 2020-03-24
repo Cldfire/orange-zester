@@ -27,6 +27,9 @@ enum Opts {
         /// Client ID
         #[structopt(long)]
         client_id: Option<String>,
+        /// Only get n most recent items
+        #[structopt(short, long, value_name = "n")]
+        recent: Option<u64>,
         /// Download all available data (archive everything)
         #[structopt(short, long)]
         all: bool,
@@ -237,12 +240,14 @@ fn main() -> Result<(), Error> {
     }
 
     match opt {
-        Opts::Json { all, pretty_print, output_folder, mut json_types, .. } => {
+        Opts::Json { recent, all, pretty_print, output_folder, mut json_types, .. } => {
             // Manually stick all the possible types in the vector if the all flag
             // was set
             if all {
                 json_types = JsonType::into_enum_iter().collect();
             }
+
+            let recent = recent.unwrap_or(std::u64::MAX);
 
             // Grab all the data we were asked to
             for json_type in json_types {
@@ -252,11 +257,13 @@ fn main() -> Result<(), Error> {
 
                         pb.set_style(bar_style.clone());
                         pb.set_message("Zesting likes");
-                        let total_likes_count = zester.me.as_ref().unwrap().likes_count.unwrap();
-                        pb.set_length(total_likes_count as u64);
 
                         let path = output_folder.join("likes.json");
-                        let likes = zester.likes(|e| match e {
+                        let likes = zester.likes(recent, |e| match e {
+                            NumLikesInfoToDownload { num } => {
+                                pb.set_length(num);
+                            },
+
                             MoreLikesInfoDownloaded { count } => {
                                 pb.inc(count as u64);
                             },
@@ -289,11 +296,13 @@ fn main() -> Result<(), Error> {
                         pb.set_style(bar_style_prefix.clone());
                         pb.set_prefix("Zesting playlists");
                         pb.set_message("Getting list of playlists");
-                        let total_playlist_count = zester.me.as_ref().unwrap().total_playlist_count();
-                        pb.set_length(total_playlist_count as u64);
 
                         let path = output_folder.join("playlists.json");
-                        let playlists = zester.playlists(|e: PlaylistsZestingEvent<'_>| match e {
+                        let playlists = zester.playlists(recent, |e: PlaylistsZestingEvent<'_>| match e {
+                            NumPlaylistInfoToDownload { num } => {
+                                pb.set_length(num);
+                            },
+
                             MorePlaylistMetaInfoDownloaded { count } => {
                                 pb.inc(count as u64);
                             },
